@@ -1,0 +1,70 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hermes-agent
+  namespace: hermes
+spec:
+  template:
+    spec:
+      serviceAccountName: hermes-agent
+
+      initContainers:
+        - name: install-k8sgpt
+          image: ghcr.io/k8sgpt-ai/k8sgpt:v0.4.35
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "-ec"]
+          args:
+            - |
+              SOURCE="$(command -v k8sgpt || true)"
+              if [ -z "${SOURCE}" ]; then
+                SOURCE="/k8sgpt"
+              fi
+              test -x "${SOURCE}"
+              cp "${SOURCE}" /plugin-bin/k8sgpt
+              chmod 0755 /plugin-bin/k8sgpt
+              /plugin-bin/k8sgpt version
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: k8sgpt-bin
+              mountPath: /plugin-bin
+
+        - name: install-k8sgpt-plugin
+          image: quay.io/dystewar/hermes
+          imagePullPolicy: Always
+          command: ["/bin/bash", "-ec"]
+          args:
+            - |
+              hermes plugins install "${PLUGIN_REPOSITORY}" --enable
+              hermes plugins list
+          env:
+            - name: HERMES_HOME
+              value: /opt/data
+            - name: PLUGIN_REPOSITORY
+              value: https://github.com/dystewart/hermes-k8sgpt-plugin.git
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: data
+              mountPath: /opt/data
+
+      containers:
+        - name: hermes
+          env:
+            - name: K8SGPT_BIN
+              value: /opt/data/.local/bin/k8sgpt
+            - name: K8SGPT_TIMEOUT
+              value: "180"
+            - name: K8SGPT_MAX_OUTPUT_BYTES
+              value: "2097152"
+          volumeMounts:
+            - name: k8sgpt-bin
+              mountPath: /opt/data/.local/bin
+
+      volumes:
+        - name: k8sgpt-bin
+          emptyDir: {}
